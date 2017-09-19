@@ -72,6 +72,8 @@ import org.hibernate.Transaction;
 import org.hibernate.type.LongType;
 import org.unitime.timetable.gwt.server.Query;
 import org.unitime.timetable.gwt.server.Query.TermMatcher;
+import org.unitime.timetable.gwt.shared.SuggestionsInterface;
+import org.unitime.timetable.gwt.shared.SuggestionsInterface.ComputeSuggestionsRequest;
 import org.unitime.timetable.interfaces.RoomAvailabilityInterface.TimeBlock;
 import org.unitime.timetable.model.Assignment;
 import org.unitime.timetable.model.Class_;
@@ -92,6 +94,10 @@ import org.unitime.timetable.model.dao.RoomTypeDAO;
 import org.unitime.timetable.model.dao.SolutionDAO;
 import org.unitime.timetable.model.dao.SolverGroupDAO;
 import org.unitime.timetable.model.dao.TimePatternDAO;
+import org.unitime.timetable.server.solver.ClassAssignmentDetailsBackend;
+import org.unitime.timetable.server.solver.ComputeSuggestionsBackend;
+import org.unitime.timetable.server.solver.SelectedAssignmentBackend;
+import org.unitime.timetable.server.solver.SuggestionsContext;
 import org.unitime.timetable.server.solver.TimetableGridHelper.ResourceType;
 import org.unitime.timetable.server.solver.TimetableGridSolverHelper;
 import org.unitime.timetable.solver.interactive.ClassAssignmentDetails;
@@ -1564,5 +1570,96 @@ public class TimetableSolver extends AbstractSolver<Lecture, Placement, Timetabl
     		lock.unlock();
     	}
 		return models;
+	}
+	
+    @Override
+    public SuggestionsInterface.ClassAssignmentDetails getClassAssignmentDetails(SuggestionsContext context, Long classId, boolean includeConstraints) {
+    	Lock lock = currentSolution().getLock().readLock();
+		lock.lock();
+		try {
+    		TimetableModel model = (TimetableModel)currentSolution().getModel();
+    		for (Lecture lecture: model.variables()) {
+    			if (lecture.getClassId().equals(classId))
+    				return ClassAssignmentDetailsBackend.createClassAssignmentDetails(context, this, lecture, includeConstraints);
+    		}
+    		if (model.hasConstantVariables())
+        		for (Lecture lecture: model.constantVariables()) {
+        			if (lecture.getClassId().equals(classId))
+        				return ClassAssignmentDetailsBackend.createClassAssignmentDetails(context, this, lecture, includeConstraints);
+        		}
+   			return null;
+    	} finally {
+    		lock.unlock();
+    	}
+    }
+    
+    public SuggestionsInterface.Suggestion getSelectedSuggestion(SuggestionsContext context, SuggestionsInterface.SelectedAssignmentsRequest request) {
+    	if (iWorking) return null;
+    	Lock lock = currentSolution().getLock().writeLock();
+		lock.lock();
+		try {
+			return SelectedAssignmentBackend.computeSuggestion(context, this, request.getAssignments(), null);
+		} finally {
+			lock.unlock();
+		}
+	}
+    
+    @Override
+    public void assignSelectedAssignments(List<SuggestionsInterface.SelectedAssignment> assignments) {
+    	Lock lock = currentSolution().getLock().writeLock();
+		lock.lock();
+		try {
+			TimetableModel model = (TimetableModel)currentSolution().getModel();
+			org.cpsolver.ifs.assignment.Assignment<Lecture, Placement> assignment = currentSolution().getAssignment();
+			Map<Lecture, Placement> initialAssignments = new HashMap<Lecture, Placement>();
+			for (Placement placement: assignment.assignedValues())
+				initialAssignments.put(placement.variable(), placement);
+			AssignmentRecord record = new AssignmentRecord(this);
+			List<Placement> placements = new ArrayList<Placement>();
+			for (SuggestionsInterface.SelectedAssignment selected: assignments) {
+				if (selected.getDays() == 0) {
+					Lecture lecture = null;
+					for (Lecture l: model.variables())
+						if (l.getClassId().equals(selected.getClassId())) { lecture = l; break; }
+					if (lecture != null && !lecture.isCommitted())
+						assignment.unassign(0, lecture);
+				} else {
+					Placement p = SelectedAssignmentBackend.getPlacement(model, selected, true);
+					if (p != null) {
+						Placement ini = initialAssignments.get(p.variable());
+						record.add(ini,p);
+						Progress.getInstance(model).info(p.variable().getName() + ": " + (ini == null ? "not assigned" : ini.getLongName(useAmPm())) + " &rarr; " + p.getLongName(useAmPm()));
+	                    if (ini != null) assignment.unassign(0, p.variable());
+	                    placements.add(p);
+					}
+				}
+			}
+			for (Placement p: placements) {
+				assignment.assign(0, p);
+            }
+			for (Lecture lec: model.unassignedVariables(assignment)) {
+				Placement p = initialAssignments.get(lec);
+				if (p != null) { 
+					record.add(p, null);
+					Progress.getInstance(model).info(p.variable().getName() + ": " + p.getLongName(useAmPm()) + " &rarr; not assigned");
+				}
+			}
+			record.done();
+			iAssignmentRecords.addElement(record);
+		} finally {
+			lock.unlock();
+		}
+    }
+
+	@Override
+	public org.unitime.timetable.gwt.shared.SuggestionsInterface.Suggestions computeSuggestions(SuggestionsContext context, ComputeSuggestionsRequest request) {
+    	if (iWorking) return null;
+    	Lock lock = currentSolution().getLock().writeLock();
+		lock.lock();
+		try {
+			return ComputeSuggestionsBackend.computeSuggestions(context, this, request);
+		} finally {
+			lock.unlock();
+		}
 	}
 }

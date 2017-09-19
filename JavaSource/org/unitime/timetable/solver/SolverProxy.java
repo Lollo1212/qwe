@@ -27,7 +27,9 @@ import java.util.Set;
 import java.util.Vector;
 
 import org.cpsolver.ifs.util.CSVFile;
+import org.unitime.timetable.gwt.shared.SuggestionsInterface;
 import org.unitime.timetable.gwt.shared.TimetableGridInterface.TimetableGridModel;
+import org.unitime.timetable.server.solver.SuggestionsContext;
 import org.unitime.timetable.solver.interactive.ClassAssignmentDetails;
 import org.unitime.timetable.solver.interactive.Hint;
 import org.unitime.timetable.solver.interactive.Suggestions;
@@ -88,4 +90,9 @@ public interface SolverProxy extends ClassAssignmentProxy, CommonSolverInterface
 
     public Hashtable getAssignmentTable2(Collection classesOrClassIds);
     public Hashtable getAssignmentInfoTable2(Collection classesOrClassIds);
+    
+	public SuggestionsInterface.ClassAssignmentDetails getClassAssignmentDetails(SuggestionsContext context, Long classId, boolean includeConstraints);
+	public SuggestionsInterface.Suggestion getSelectedSuggestion(SuggestionsContext context, SuggestionsInterface.SelectedAssignmentsRequest request);
+	public void assignSelectedAssignments(List<SuggestionsInterface.SelectedAssignment> assignments);
+	public SuggestionsInterface.Suggestions computeSuggestions(SuggestionsContext context, SuggestionsInterface.ComputeSuggestionsRequest request);
 }
